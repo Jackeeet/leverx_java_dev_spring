@@ -14,15 +14,17 @@ public class StoreThreads implements CommandLineRunner {
     private final ExecutorService executor;
     private final ObjectProvider<Customer> customerProvider;
     private final ObjectProvider<OrderWorker> orderWorkerProvider;
+    private final ObjectProvider<OrderFulfillmentService> orderFulfillmentServiceProvider;
 
     public StoreThreads(
             Store store, ExecutorService executor,
-            ObjectProvider<Customer> customerProvider, ObjectProvider<OrderWorker> orderWorkerProvider
+            ObjectProvider<Customer> customerProvider, ObjectProvider<OrderWorker> orderWorkerProvider, ObjectProvider<OrderFulfillmentService> orderFulfillmentServiceProvider
     ) {
         this.store = store;
         this.executor = executor;
         this.customerProvider = customerProvider;
         this.orderWorkerProvider = orderWorkerProvider;
+        this.orderFulfillmentServiceProvider = orderFulfillmentServiceProvider;
     }
 
     public static void main(String[] args) {
@@ -64,7 +66,9 @@ public class StoreThreads implements CommandLineRunner {
                 executor.submit(customerProvider.getObject(i + 1, store));
             }
             for (int i = 0; i < workerCount; i++) {
-                executor.submit(orderWorkerProvider.getObject(i + 1, store));
+                executor.submit(orderWorkerProvider.getObject(
+                        i + 1, store, orderFulfillmentServiceProvider.getObject(store)
+                ));
             }
 
             executor.shutdown();
@@ -77,8 +81,6 @@ public class StoreThreads implements CommandLineRunner {
                 store.printSoldProductsInfo();
                 System.out.println("----");
             }
-
-            System.out.println(store.getStoreAnalytics(3).getPrettyPrintString());
         } catch (NumberFormatException e) {
             System.err.println("Error: number of customers and number of workers must be positive integers.");
         }
