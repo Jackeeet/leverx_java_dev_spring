@@ -15,16 +15,21 @@ public class StoreThreads implements CommandLineRunner {
     private final ObjectProvider<Customer> customerProvider;
     private final ObjectProvider<OrderWorker> orderWorkerProvider;
     private final ObjectProvider<OrderFulfillmentService> orderFulfillmentServiceProvider;
+    private final ObjectProvider<ReservationService> reservationServiceProvider;
 
     public StoreThreads(
             Store store, ExecutorService executor,
-            ObjectProvider<Customer> customerProvider, ObjectProvider<OrderWorker> orderWorkerProvider, ObjectProvider<OrderFulfillmentService> orderFulfillmentServiceProvider
+            ObjectProvider<Customer> customerProvider,
+            ObjectProvider<OrderWorker> orderWorkerProvider,
+            ObjectProvider<OrderFulfillmentService> orderFulfillmentServiceProvider,
+            ObjectProvider<ReservationService> reservationServiceProvider
     ) {
         this.store = store;
         this.executor = executor;
         this.customerProvider = customerProvider;
         this.orderWorkerProvider = orderWorkerProvider;
         this.orderFulfillmentServiceProvider = orderFulfillmentServiceProvider;
+        this.reservationServiceProvider = reservationServiceProvider;
     }
 
     public static void main(String[] args) {
@@ -63,7 +68,9 @@ public class StoreThreads implements CommandLineRunner {
             store.initializeWarehouse(maxProducts, maxQuantity);
 
             for (int i = 0; i < customerCount; i++) {
-                executor.submit(customerProvider.getObject(i + 1, store));
+                executor.submit(customerProvider.getObject(
+                        i + 1, store, reservationServiceProvider.getObject(store)
+                ));
             }
             for (int i = 0; i < workerCount; i++) {
                 executor.submit(orderWorkerProvider.getObject(

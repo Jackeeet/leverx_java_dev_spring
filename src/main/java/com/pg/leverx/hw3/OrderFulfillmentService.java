@@ -18,7 +18,7 @@ public class OrderFulfillmentService {
     public boolean tryFulfillOrder(Order order) throws InterruptedException {
         AtomicBoolean success = new AtomicBoolean(false);
         this.store.warehouse.computeIfPresent(order.product, (_, qtyInStock) -> {
-            if (qtyInStock < order.quantity) {
+            if (qtyInStock.available < order.quantity) {
                 // if a customer ordered more than currently available (because another order
                 // for the same product already went through and some items were sold),
                 // the order can't be fulfilled and will be marked as PROCESSED_NOT_FULFILLED
@@ -26,7 +26,7 @@ public class OrderFulfillmentService {
             }
 
             success.set(true);
-            return qtyInStock - order.quantity;
+            return new StockQuantity(qtyInStock.available - order.quantity, qtyInStock.reserved);
         });
 
         order.setStatus(success.get() ?
