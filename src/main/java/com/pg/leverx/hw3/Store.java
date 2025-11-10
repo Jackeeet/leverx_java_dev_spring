@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 @Service
@@ -14,17 +15,13 @@ public class Store {
     private static final double MIN_PRICE = 0.01;
     private static final double MAX_PRICE = 1000.00;
 
-    public final ConcurrentMap<Product, Integer> warehouse;
+    public final ConcurrentMap<Product, StockQuantity> warehouse;
     public final CopyOnWriteArrayList<Order> processedOrders;
     public final BlockingQueue<Order> queuedOrders;
 
     private boolean warehouseInitialized = false;
 
     public Store() {
-        // because maxProductCount and maxQuantity are provided by the user through the console,
-        // after Spring initializes the Store singleton, I've changed the warehouse initialization
-        // strategy to creating the HashMap instance in the constructor and initializing the data
-        // later by passing user parameters through a method
         this.warehouse = new ConcurrentHashMap<>();
         this.processedOrders = new CopyOnWriteArrayList<>();
         this.queuedOrders = new LinkedBlockingQueue<>();
@@ -33,18 +30,45 @@ public class Store {
     // product catalog: all products from the warehouse where quantity is not zero
     public List<Map.Entry<Product, Integer>> getProductCatalog() {
         return this.warehouse.entrySet().parallelStream()
-                .filter(productEntry -> productEntry.getValue() > 0)
+                .filter(productEntry -> productEntry.getValue().available > 0)
+                .map(productEntry ->
+                        Map.entry(productEntry.getKey(), productEntry.getValue().available)
+                )
                 .toList();
+    }
+
+    public boolean placeReservation(Reservation reservation) {
+        AtomicBoolean success = new AtomicBoolean(false);
+        this.warehouse.computeIfPresent(reservation.product, (_, qtyInStock) -> {
+            if (qtyInStock.available < reservation.quantity) {
+                return qtyInStock;
+            }
+
+            success.set(true);
+            reservation.setTotalStockAtReserveTime(qtyInStock.total());
+            return new StockQuantity(
+                    qtyInStock.available - reservation.quantity,
+                    qtyInStock.reserved + reservation.quantity
+            );
+        });
+
+        return success.get();
+    }
+
+    public void cancelReservation(Reservation reservation) {
+        this.warehouse.compute(reservation.product, (_, qtyInStock) -> new StockQuantity(
+                qtyInStock.available + reservation.quantity, qtyInStock.reserved - reservation.quantity)
+        );
     }
 
     // method for debug purposes
     public void printWarehouseInfo() {
         System.out.println("Current warehouse status:");
-        List<Map.Entry<Product, Integer>> entries = this.warehouse.entrySet().parallelStream()
+        List<Map.Entry<Product, StockQuantity>> entries = this.warehouse.entrySet().parallelStream()
                 .sorted(Comparator.comparingInt(e -> e.getKey().productId))
                 .toList();
-        for (Map.Entry<Product, Integer> entry : entries) {
-            System.out.println(entry.getKey() + " (x" + entry.getValue() + ")");
+        for (Map.Entry<Product, StockQuantity> entry : entries) {
+            System.out.println(entry.getKey() + " (" + entry.getValue() + ")");
         }
     }
 
@@ -59,11 +83,10 @@ public class Store {
                 .toList();
         for (Map.Entry<Product, Integer> soldProduct : soldProducts) {
             BigDecimal productProfit = soldProduct.getKey().price.multiply(BigDecimal.valueOf(soldProduct.getValue()));
-            System.out.println(soldProduct.getKey() + " (x" + soldProduct.getValue() + ", " + productProfit + ")");
+            System.out.println(soldProduct.getKey() + " (" + soldProduct.getValue() + ", " + productProfit + ")");
         }
     }
 
-    // updated warehouse initialization method to use with Spring
     public void initializeWarehouse(int maxProductCount, int maxQuantity) {
         if (warehouseInitialized)
             return;
@@ -75,7 +98,7 @@ public class Store {
             Product product = new Product(i + 1, price);
             int quantity = RANDOM_GEN.nextInt(1, maxQuantity + 1);
             // this is run once in a single thread, before other threads start modifying the data, so we can use 'put' safely
-            warehouse.put(product, quantity);
+            warehouse.put(product, new StockQuantity(quantity, 0));
             System.out.println(product + " (x" + quantity + ")");
         }
         warehouseInitialized = true;

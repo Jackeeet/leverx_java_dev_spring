@@ -1,8 +1,6 @@
 package com.pg.leverx.hw3;
 
-import org.aspectj.lang.annotation.AfterReturning;
-import org.aspectj.lang.annotation.Aspect;
-import org.aspectj.lang.annotation.Pointcut;
+import org.aspectj.lang.annotation.*;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -19,6 +17,7 @@ public class Analytics {
     private final AtomicInteger fulfilledOrderCount = new AtomicInteger(0);
     private BigDecimal totalProfit = BigDecimal.ZERO;
     private final ConcurrentHashMap<Product, Integer> soldProductsQuantity = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Product, Double> highestReservationPercentages = new ConcurrentHashMap<>();
 
     @Pointcut("execution(* com.pg.leverx.hw3.OrderFulfillmentService.*(..))")
     public void orderProcessed() {
@@ -50,6 +49,31 @@ public class Analytics {
         }
     }
 
+    @Pointcut("execution(* com.pg.leverx.hw3.ReservationService.tryPlaceReservation(..))")
+    public void reservationPlaced() {
+    }
+
+    @AfterReturning(value = "reservationPlaced() && args(reservation)", returning = "success")
+    public boolean processReservationPercentage(Reservation reservation, boolean success) throws IllegalStateException {
+        if (success) {
+            Integer qtyInStockBeforeReserving = reservation.getTotalStockAtReserveTime();
+            if (qtyInStockBeforeReserving == null) {
+                throw new IllegalStateException(
+                        "Successfully placed reservation can not have a null total stock at reserve time"
+                );
+            }
+            double reservedPercentage = reservation.quantity * 100.0 / qtyInStockBeforeReserving;
+            this.highestReservationPercentages.compute(reservation.product, (_, percentage) -> {
+                if (percentage == null || reservedPercentage > percentage) {
+                    return reservedPercentage;
+                }
+
+                return percentage;
+            });
+        }
+        return success;
+    }
+
     private synchronized void addProfit(BigDecimal sum) {
         this.totalProfit = this.totalProfit.add(sum);
     }
@@ -72,6 +96,16 @@ public class Analytics {
                     .append(") Product ").append(bestseller.getKey().productId)
                     .append(", ").append(bestseller.getValue()).append(" items sold");
         }
+
+        message.append("\n- highest reservation percentage per product:");
+        List<Map.Entry<Product, Double>> highestPercentages = this.highestReservationPercentages.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey(Comparator.comparingInt(p -> p.productId)))
+                .toList();
+        for (Map.Entry<Product, Double> p : highestPercentages) {
+            message.append("\n  - Product ").append(p.getKey().productId).append(": ")
+                    .append(Math.round(p.getValue() * 100.0) / 100.0).append("%");
+        }
+
 
         System.out.println(message);
     }
